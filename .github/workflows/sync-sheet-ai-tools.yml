@@ -2,22 +2,63 @@ name: Sync Google Sheet to Supabase
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - 'supabase/functions/sync-sheet-ai-tools/**'
 
 jobs:
-  deploy:
+  sync:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repo
+        uses: actions/checkout@v3
 
-      - name: Setup Supabase CLI
-        run: |
-          npm install -g supabase
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
 
-      - name: Deploy Edge Function
-        run: |
-          supabase functions deploy sync-sheet-ai-tools --project-ref ${{ secrets.SUPABASE_PROJECT_REF }} --no-verify-jwt
+      - name: Install dependencies
+        run: npm install axios csvtojson
+
+      - name: Fetch Google Sheet and Sync to Supabase
         env:
+          SHEET_CSV_URL: "https://docs.google.com/spreadsheets/d/1ucwDh80ApKM76eTZ5pSpzHm8Z8aaTlav/export?format=csv"
+          SUPABASE_URL: "https://xyrvhhpkfznazfadrmhy.supabase.co"
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          node <<EOF
+          const axios = require('axios');
+          const csv = require('csvtojson');
+
+          const sheetUrl = process.env.SHEET_CSV_URL;
+          const supabaseUrl = process.env.SUPABASE_URL;
+          const accessToken = process.env.SUPABASE_ACCESS_TOKEN;
+
+          const table = "ai_tools";
+
+          async function main() {
+            const response = await axios.get(sheetUrl);
+            const jsonArray = await csv().fromString(response.data);
+
+            for (const row of jsonArray) {
+              await axios.post(
+                `${supabaseUrl}/rest/v1/${table}`,
+                row,
+                {
+                  headers: {
+                    apikey: accessToken,
+                    Authorization: `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json',
+                    Prefer: 'resolution=merge-duplicates'
+                  }
+                }
+              );
+            }
+
+            console.log("✅ Synced to Supabase!");
+          }
+
+          main().catch(err => {
+            console.error("❌ Sync failed:", err.message);
+            process.exit(1);
+          });
+          EOF
