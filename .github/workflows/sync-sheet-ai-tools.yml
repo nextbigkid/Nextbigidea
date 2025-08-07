@@ -1,44 +1,23 @@
-// supabase/functions/sync-sheet-ai-tools/index.ts
+name: Sync Google Sheet to Supabase
 
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'supabase/functions/sync-sheet-ai-tools/**'
 
-console.log("Edge Function started!")
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
 
-serve(async (_req) => {
-  const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1ucwDh80ApKM76eTZ5pSpzHm8Z8aaTlav/export?format=csv"
-  
-  const res = await fetch(SHEET_CSV_URL)
-  const csv = await res.text()
+      - name: Setup Supabase CLI
+        run: |
+          npm install -g supabase
 
-  const rows = csv.trim().split("\n").slice(1) // Remove header
-  const tools = rows.map(row => {
-    const [title, description, api_url, api_method, auth_required, category] = row.split(",")
-    return {
-      title: title?.trim(),
-      description: description?.trim(),
-      api_url: api_url?.trim(),
-      api_method: api_method?.trim(),
-      auth_required: auth_required?.toLowerCase().includes("true"),
-      category: category?.trim()
-    }
-  })
-
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")!
-  const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-  const table = "ai_tools"
-
-  const insertRes = await fetch(`${supabaseUrl}/rest/v1/${table}`, {
-    method: "POST",
-    headers: {
-      "apikey": supabaseKey,
-      "Authorization": `Bearer ${supabaseKey}`,
-      "Content-Type": "application/json",
-      "Prefer": "upsert"
-    },
-    body: JSON.stringify(tools)
-  })
-
-  const result = await insertRes.text()
-
-  return new Response(`Sheet sync complete.\nStatus: ${insertRes.status}\nResult: ${result}`)
-})
+      - name: Deploy Edge Function
+        run: |
+          supabase functions deploy sync-sheet-ai-tools --project-ref ${{ secrets.SUPABASE_PROJECT_REF }} --no-verify-jwt
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
